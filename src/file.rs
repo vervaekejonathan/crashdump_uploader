@@ -3,6 +3,7 @@ use crate::mail;
 use aws_sdk_sesv2::Error;
 use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use std::fs;
+use std::process::Command;
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
@@ -69,7 +70,14 @@ pub async fn watch_all_files_in_folder(
 // read the content of a file, e-mail it and remove the file
 async fn handle_file(email: &str, serialnumber: &str, filename: &str) {
     println!("\t{}", filename);
-    // read the files content
+    if filename.contains("crash.txt") {
+        handle_backtrace(email, serialnumber, filename).await;
+    } else {
+        handle_gdb(filename).await;
+    }
+}
+
+async fn handle_backtrace(email: &str, serialnumber: &str, filename: &str) {
     let contents = fs::read_to_string(filename).expect("Something went wrong reading the file");
 
     // e-mail the files content through AWS SES
@@ -83,4 +91,20 @@ async fn handle_file(email: &str, serialnumber: &str, filename: &str) {
             println!("Error sending mail: {}", err)
         }
     }
+}
+
+async fn handle_gdb(filename: &str) {
+    let filename_split: Vec<&str> = filename.split(".").collect();
+    // sudo gdb --exec=`whereis $EXEC` --core=$f -ex="thread apply all bt"  -ex=qui
+    Command::new("gdb")
+        .arg(format!(
+            "--exec=`whereis {}",
+            filename_split.get(1).unwrap_or(&"")
+        ))
+        .arg(format!("--core={}", filename))
+        .arg(format!("-ex=\"thread apply all bt\""))
+        .arg(format!("-ex=quit"))
+        .output()
+        .expect("failed to execute process");
+    //fs::remove_file(filename).unwrap();
 }
